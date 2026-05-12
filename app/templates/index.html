@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>Senarai Keluarga</h2>
+  <div>
+    <input id="search-box" class="form-control d-inline-block" style="width: 300px;"
+           type="search" placeholder="Cari nama ahli keluarga...">
+  </div>
+</div>
+
+<div id="login-prompt" class="alert alert-info" style="display:none;">
+  Sila <a href="/login">log masuk dengan akaun Google</a> untuk melihat data keluarga.
+</div>
+
+<div id="search-results" class="row g-3 mb-4" style="display:none;"></div>
+
+<h4 id="households-heading">Keluarga Berdaftar</h4>
+<div id="households-list" class="row g-3"></div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/index.js"></script>
+{% endblock %}

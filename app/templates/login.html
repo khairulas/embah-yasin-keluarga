@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Log Masuk — Keluarga Embah Yasin{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body p-4 text-center">
+        <h3 class="mb-3">Log Masuk</h3>
+        <p class="text-muted mb-4">
+          Sistem ini terhad kepada keturunan dan keluarga Embah Yasin.
+          Sila log masuk menggunakan akaun Google anda.
+        </p>
+        <button id="google-signin-btn" class="btn btn-primary btn-lg">
+          <svg width="20" height="20" viewBox="0 0 48 48" class="me-2">
+            <path fill="#FFC107" d="M43.6 20H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-4z"/>
+            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.4 6.3 14.7z"/>
+            <path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.4l-6.4-5.4c-2 1.4-4.5 2.3-7.6 2.3-5.2 0-9.6-3.3-11.2-8L6.1 32.4C9.5 39.6 16.2 44 24 44z"/>
+            <path fill="#1976D2" d="M43.6 20H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.3 5.7l6.4 5.4C40.3 35.5 44 30.2 44 24c0-1.3-.1-2.7-.4-4z"/>
+          </svg>
+          Sign in with Google
+        </button>
+        <div id="login-error" class="alert alert-danger mt-3" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/login.js"></script>
+{% endblock %}

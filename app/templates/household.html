@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Keluarga — Embah Yasin{% endblock %}
+{% block content %}
+<div id="loading" class="text-center py-5">
+  <div class="spinner-border" role="status"></div>
+</div>
+
+<div id="household-content" style="display:none;">
+  <h2 id="household-title">Keluarga</h2>
+  <p class="text-muted">Daftar oleh: <span id="registered-by"></span> · <span id="registered-at"></span></p>
+
+  <h5 class="mt-4">Ahli Keluarga</h5>
+  <div id="members-list" class="list-group mb-4"></div>
+
+  <h5 class="mt-4">Sejarah Perubahan</h5>
+  <div id="audit-list"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.HOUSEHOLD_ID = {{ household_id | tojson }};</script>
+<script type="module" src="/static/household.js"></script>
+{% endblock %}
