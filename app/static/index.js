@@ -60,9 +60,10 @@ searchBox.addEventListener("input", (e) => {
 async function doSearch(q) {
   try {
     const resp = await authedFetch(`/api/persons?q=${encodeURIComponent(q)}`);
-    const { persons } = await resp.json();
+    const json = await resp.json();
+    const persons = json.persons;
     searchResults.style.display = "flex";
-    if (!persons.length) {
+    if (!persons || !persons.length) {
       searchResults.innerHTML = '<div class="col-12 text-muted">Tiada hasil carian.</div>';
       return;
     }
@@ -83,7 +84,8 @@ async function doSearch(q) {
         </div>
       `).join("");
   } catch (e) {
-    searchResults.innerHTML = `<div class="col-12 text-danger">Ralat: ${e.message}</div>`;
+    searchResults.style.display = "flex";
+    searchResults.innerHTML = `<div class="col-12 text-danger">Ralat carian: ${escapeHtml(e.message)}</div>`;
   }
 }
 
