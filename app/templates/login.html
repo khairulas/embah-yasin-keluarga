@@ -19,6 +19,37 @@
           </svg>
           Sign in with Google
         </button>
+
+        <!-- Dev-only: email/password sign-in for emulator testing -->
+        <div id="dev-login" style="display:none; margin-top: 2rem; padding: 1rem; border: 1px dashed #ccc; border-radius: 4px;">
+          <h6 class="text-muted">🔧 Dev login (emulator only)</h6>
+          <input type="email" id="dev-email" class="form-control mb-2" placeholder="Email" value="admin@test.local">
+          <input type="password" id="dev-password" class="form-control mb-2" placeholder="Password" value="testpass123">
+          <button id="dev-signin-btn" class="btn btn-sm btn-secondary">Sign in (dev)</button>
+          <div id="dev-error" class="text-danger small mt-2"></div>
+        </div>
+
+        <script type="module">
+          import { signInWithEmailPassword } from "{{ url_for('static', filename='auth.js') }}";
+
+          const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+          if (isLocal) {
+            document.getElementById("dev-login").style.display = "block";
+            document.getElementById("dev-signin-btn").addEventListener("click", async () => {
+              const email = document.getElementById("dev-email").value;
+              const password = document.getElementById("dev-password").value;
+              const errEl = document.getElementById("dev-error");
+              errEl.textContent = "";
+              try {
+                await signInWithEmailPassword(email, password);
+                window.location.href = "/";
+              } catch (e) {
+                errEl.textContent = e.message;
+              }
+            });
+          }
+        </script>
+
         <div id="login-error" class="alert alert-danger mt-3" style="display:none;"></div>
       </div>
     </div>

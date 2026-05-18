@@ -18,6 +18,10 @@ from .repositories import (
 )
 from .models import ValidationError
 
+from .auth import login_required, admin_required, editor_required
+from .repositories import (
+    PersonRepository, HouseholdRepository, RelationshipRepository, recent_activity
+)
 
 bp = Blueprint("main", __name__)
 
@@ -201,6 +205,185 @@ def api_person_audit(person_id):
             .order_by("changed_at", direction=gcf.Query.DESCENDING).limit(100))
     return jsonify({"audit": [{"log_id": s.id, **s.to_dict()} for s in q.stream()]})
 
+# ---------------------------- HTML pages: tree ----------------------------
+
+@bp.route("/tree")
+def tree_default_page():
+    founder_id = os.environ.get("FOUNDER_PERSON_ID", "")
+    return render_template("tree.html",
+                           focus_id=founder_id,
+                           firebase_config=_public_firebase_config())
+
+
+@bp.route("/tree/<person_id>")
+def tree_focus_page(person_id):
+    return render_template("tree.html",
+                           focus_id=person_id,
+                           firebase_config=_public_firebase_config())
+
+
+# ---------------------------- JSON API: tree ----------------------------
+
+@bp.route("/api/tree/<person_id>", methods=["GET"])
+@login_required
+def api_tree(person_id):
+    MAX_UP, MAX_DOWN = 4, 6
+
+    def _year(s):
+        if not s: return None
+        return int(s[:4]) if s[:4].isdigit() else None
+
+    repo = PersonRepository()
+    all_persons = repo.list_all(limit=2000)
+    persons_by_id = {p["person_id"]: p for p in all_persons}
+
+    if person_id not in persons_by_id:
+        return jsonify({"error": "person not found"}), 404
+
+    def _node(p):
+        return {
+            "id": p["person_id"],
+            "name": p.get("full_name", "—"),
+            "birth_year": _year(p.get("birth_date") or p.get("dob")),
+            "death_year": _year(p.get("death_date")),
+            "gender": p.get("gender"),
+            "is_deceased": bool(p.get("death_date")) or (p.get("status") == "deceased"),
+            "spouse_ids": p.get("spouse_ids") or [],
+            "parent_ids": p.get("parent_ids") or [],
+            "child_ids": p.get("child_ids") or [],
+        }
+
+    def _subtree(pid, depth, max_depth, visited):
+        if pid in visited or depth > max_depth:
+            return None
+        visited.add(pid)
+        p = persons_by_id.get(pid)
+        if not p:
+            return None
+        node = _node(p)
+        node["spouses"] = [_node(persons_by_id[s])
+                            for s in node["spouse_ids"] if s in persons_by_id]
+        node["children"] = [c for c in (
+            _subtree(cid, depth + 1, max_depth, visited)
+            for cid in node["child_ids"]
+        ) if c is not None]
+        return node
+
+    def _ancestors(pid, depth, max_depth, visited):
+        if pid in visited or depth > max_depth:
+            return None
+        visited.add(pid)
+        p = persons_by_id.get(pid)
+        if not p:
+            return None
+        node = _node(p)
+        node["children"] = [a for a in (
+            _ancestors(parent_id, depth + 1, max_depth, visited)
+            for parent_id in node["parent_ids"]
+        ) if a is not None]
+        return node
+
+    descendants = _subtree(person_id, 0, MAX_DOWN, set())
+    ancestors = _ancestors(person_id, 0, MAX_UP, set())
+
+    return jsonify({
+        "focus_id": person_id,
+        "descendants": descendants,
+        "ancestors": ancestors,
+    })
+
+
+# ---------------------------- JSON API: relationships ----------------------------
+
+@bp.route("/api/relationships/parent-child", methods=["POST"])
+@editor_required
+def api_add_parent_child():
+    data = request.get_json() or {}
+    actor = _actor_from_g()
+    try:
+        RelationshipRepository().add_parent_child(
+            parent_id=data["parent_id"],
+            child_id=data["child_id"],
+            actor=actor,
+        )
+        return jsonify({"ok": True})
+    except (ValidationError, KeyError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/relationships/parent-child", methods=["DELETE"])
+@editor_required
+def api_remove_parent_child():
+    data = request.get_json() or {}
+    actor = _actor_from_g()
+    try:
+        RelationshipRepository().remove_parent_child(
+            parent_id=data["parent_id"],
+            child_id=data["child_id"],
+            actor=actor,
+            reason=data.get("reason", ""),
+        )
+        return jsonify({"ok": True})
+    except (ValidationError, KeyError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/relationships/spouse", methods=["POST"])
+@editor_required
+def api_add_spouse():
+    data = request.get_json() or {}
+    actor = _actor_from_g()
+    try:
+        RelationshipRepository().add_spouse(
+            a_id=data["a_id"], b_id=data["b_id"], actor=actor,
+        )
+        return jsonify({"ok": True})
+    except (ValidationError, KeyError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/relationships/spouse", methods=["DELETE"])
+@editor_required
+def api_remove_spouse():
+    data = request.get_json() or {}
+    actor = _actor_from_g()
+    try:
+        RelationshipRepository().remove_spouse(
+            a_id=data["a_id"], b_id=data["b_id"],
+            actor=actor, reason=data.get("reason", ""),
+        )
+        return jsonify({"ok": True})
+    except (ValidationError, KeyError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ---------------------------- GEDCOM export ----------------------------
+
+@bp.route("/export/gedcom", methods=["GET"])
+@login_required
+def export_gedcom():
+    from flask import Response
+    from datetime import datetime as _dt
+    from .services.gedcom_export import export_gedcom as build_gedcom
+    repo = PersonRepository()
+    all_persons = repo.list_all(limit=2000)
+    content = build_gedcom(all_persons)
+    filename = f"embah-yasin-{_dt.utcnow().strftime('%Y%m%d')}.ged"
+    return Response(
+        content,
+        mimetype="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+    
+@bp.route("/api/persons/search", methods=["GET"])
+@login_required
+def api_persons_search():
+    """Substring search for the relationship picker."""
+    q = request.args.get("q", "")
+    exclude = request.args.get("exclude")
+    repo = PersonRepository()
+    results = repo.search_substring(q, limit=20, exclude_id=exclude)
+    return jsonify({"results": results})
 
 # ---------------------------- helpers ----------------------------
 

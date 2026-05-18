@@ -1,0 +1,81 @@
+<!-- templates/partials/relationships_panel.html -->
+<div class="card mt-4" data-person-id="{{ person.id }}">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0">Hubungan Keluarga</h5>
+    {% if current_user_role in ['editor', 'admin'] %}
+      <div class="btn-group btn-group-sm">
+        <button class="btn btn-outline-primary" data-action="add-parent">+ Ibu Bapa</button>
+        <button class="btn btn-outline-primary" data-action="add-spouse">+ Pasangan</button>
+        <button class="btn btn-outline-primary" data-action="add-child">+ Anak</button>
+      </div>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <h6 class="text-muted">Ibu Bapa</h6>
+        <ul class="list-unstyled" id="rel-parents">
+          {% for p in parents %}
+            <li class="d-flex justify-content-between align-items-center py-1">
+              <a href="{{ url_for('persons.detail', person_id=p.id) }}">{{ p.full_name }}</a>
+              {% if current_user_role in ['editor', 'admin'] %}
+                <button class="btn btn-sm btn-link text-danger p-0"
+                        data-action="remove-parent" data-parent-id="{{ p.id }}">×</button>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="col-md-4">
+        <h6 class="text-muted">Pasangan</h6>
+        <ul class="list-unstyled" id="rel-spouses">
+          {% for s in spouses %}
+            <li class="d-flex justify-content-between align-items-center py-1">
+              <a href="{{ url_for('persons.detail', person_id=s.id) }}">{{ s.full_name }}</a>
+              {% if current_user_role in ['editor', 'admin'] %}
+                <button class="btn btn-sm btn-link text-danger p-0"
+                        data-action="remove-spouse" data-spouse-id="{{ s.id }}">×</button>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="col-md-4">
+        <h6 class="text-muted">Anak</h6>
+        <ul class="list-unstyled" id="rel-children">
+          {% for c in children %}
+            <li class="d-flex justify-content-between align-items-center py-1">
+              <a href="{{ url_for('persons.detail', person_id=c.id) }}">{{ c.full_name }}</a>
+              {% if current_user_role in ['editor', 'admin'] %}
+                <button class="btn btn-sm btn-link text-danger p-0"
+                        data-action="remove-child" data-child-id="{{ c.id }}">×</button>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Person picker modal -->
+<div class="modal fade" id="personPicker" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Pilih orang</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="search" class="form-control" id="pickerSearch"
+               placeholder="Cari nama (minimum 2 huruf)..." autocomplete="off">
+        <div id="pickerResults" class="list-group mt-3"></div>
+        <div id="pickerConfirm" class="alert alert-info mt-3 d-none">
+          <div id="pickerConfirmText"></div>
+          <button class="btn btn-primary btn-sm mt-2" id="pickerConfirmBtn">Sahkan</button>
+          <button class="btn btn-secondary btn-sm mt-2" id="pickerCancelBtn">Batal</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

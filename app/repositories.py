@@ -101,6 +101,33 @@ class PersonRepository:
             d["person_id"] = snap.id
             out.append(d)
         return out
+    
+    def search_substring(self, query: str, *, limit: int = 20,
+                     exclude_id: Optional[str] = None) -> list[dict]:
+        """In-memory substring search across all persons. For relationship picker.
+        Returns lightweight records: id, full_name, birth_year, gender.
+        Fine for datasets under a few thousand."""
+        q_lower = (query or "").lower().strip()
+        if len(q_lower) < 2:
+            return []
+
+        all_persons = self.list_all(limit=5000)
+        results = []
+        for p in all_persons:
+            if exclude_id and p["person_id"] == exclude_id:
+                continue
+            haystack = (p.get("full_name_lower") or p.get("full_name", "").lower())
+            if q_lower in haystack:
+                birth = p.get("birth_date") or p.get("dob") or ""
+                results.append({
+                    "id": p["person_id"],
+                    "full_name": p.get("full_name", "—"),
+                    "birth_year": birth[:4] if birth else None,
+                    "gender": p.get("gender"),
+                })
+                if len(results) >= limit:
+                    break
+        return results
 
     def create(self, data: dict, *, actor: dict, person_id: Optional[str] = None) -> str:
         """Create a new person. Returns the new person_id."""
@@ -414,3 +441,185 @@ def recent_activity(limit: int = 50) -> list[dict]:
             d["parent_id"] = parent.id
         out.append(d)
     return out
+
+# ------------------------------ Relationships ------------------------------
+
+class RelationshipRepository:
+    """
+    Manages cross-document relationship edges (parent/child, spouse).
+    All writes are batched and audited on both affected documents.
+    """
+
+    def __init__(self):
+        self.db = get_db()
+
+    def _persons(self):
+        return self.db.collection("persons")
+
+    def _get_existing(self, person_id: str) -> dict:
+        snap = self._persons().document(person_id).get()
+        if not snap.exists:
+            raise ValidationError(f"Person {person_id} not found")
+        data = snap.to_dict()
+        if data.get("is_deleted"):
+            raise ValidationError(f"Person {person_id} is deleted")
+        return data
+
+    def _would_create_cycle(self, parent_id: str, child_id: str) -> bool:
+        """True if parent_id is already a descendant of child_id (so adding
+        parent->child would create a loop)."""
+        visited, queue = set(), [child_id]
+        while queue:
+            current = queue.pop(0)
+            if current == parent_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            snap = self._persons().document(current).get()
+            if snap.exists:
+                queue.extend(snap.to_dict().get("child_ids") or [])
+        return False
+
+    def add_parent_child(self, parent_id: str, child_id: str, *, actor: dict):
+        if parent_id == child_id:
+            raise ValidationError("A person cannot be their own parent")
+
+        parent_data = self._get_existing(parent_id)
+        child_data = self._get_existing(child_id)
+
+        existing_parents = child_data.get("parent_ids") or []
+        if parent_id in existing_parents:
+            return  # idempotent — already linked
+        if len(existing_parents) >= 2:
+            raise ValidationError(
+                "Child already has two parents. Remove one first."
+            )
+        if self._would_create_cycle(parent_id, child_id):
+            raise ValidationError("This link would create a cycle in the family tree")
+
+        parent_ref = self._persons().document(parent_id)
+        child_ref = self._persons().document(child_id)
+        now = server_timestamp()
+
+        batch = self.db.batch()
+        batch.update(parent_ref, {
+            "child_ids": gcf.ArrayUnion([child_id]),
+            "updated_at": now,
+            "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.update(child_ref, {
+            "parent_ids": gcf.ArrayUnion([parent_id]),
+            "updated_at": now,
+            "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.commit()
+
+        _write_audit(parent_ref, action="add_child", actor=actor,
+                     fields_changed=["child_ids"],
+                     before={"child_ids": parent_data.get("child_ids") or []},
+                     after={"child_ids": (parent_data.get("child_ids") or []) + [child_id]})
+        _write_audit(child_ref, action="add_parent", actor=actor,
+                     fields_changed=["parent_ids"],
+                     before={"parent_ids": existing_parents},
+                     after={"parent_ids": existing_parents + [parent_id]})
+
+    def remove_parent_child(self, parent_id: str, child_id: str, *,
+                            actor: dict, reason: str):
+        if not (reason or "").strip():
+            raise ValidationError("Removal requires a reason for the audit log")
+
+        parent_data = self._get_existing(parent_id)
+        child_data = self._get_existing(child_id)
+
+        parent_ref = self._persons().document(parent_id)
+        child_ref = self._persons().document(child_id)
+        now = server_timestamp()
+
+        batch = self.db.batch()
+        batch.update(parent_ref, {
+            "child_ids": gcf.ArrayRemove([child_id]),
+            "updated_at": now,
+            "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.update(child_ref, {
+            "parent_ids": gcf.ArrayRemove([parent_id]),
+            "updated_at": now,
+            "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.commit()
+
+        actor_with_reason = {**actor, "reason": reason}
+        _write_audit(parent_ref, action="remove_child", actor=actor_with_reason,
+                     fields_changed=["child_ids"],
+                     before={"child_ids": parent_data.get("child_ids") or []},
+                     after={"child_ids": [c for c in (parent_data.get("child_ids") or []) if c != child_id],
+                            "reason": reason})
+        _write_audit(child_ref, action="remove_parent", actor=actor_with_reason,
+                     fields_changed=["parent_ids"],
+                     before={"parent_ids": child_data.get("parent_ids") or []},
+                     after={"parent_ids": [p for p in (child_data.get("parent_ids") or []) if p != parent_id],
+                            "reason": reason})
+
+    def add_spouse(self, a_id: str, b_id: str, *, actor: dict):
+        if a_id == b_id:
+            raise ValidationError("A person cannot be their own spouse")
+        a_data = self._get_existing(a_id)
+        b_data = self._get_existing(b_id)
+
+        a_ref = self._persons().document(a_id)
+        b_ref = self._persons().document(b_id)
+        now = server_timestamp()
+
+        batch = self.db.batch()
+        batch.update(a_ref, {
+            "spouse_ids": gcf.ArrayUnion([b_id]),
+            "updated_at": now, "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.update(b_ref, {
+            "spouse_ids": gcf.ArrayUnion([a_id]),
+            "updated_at": now, "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.commit()
+
+        _write_audit(a_ref, action="add_spouse", actor=actor,
+                     fields_changed=["spouse_ids"],
+                     before={"spouse_ids": a_data.get("spouse_ids") or []},
+                     after={"spouse_ids": (a_data.get("spouse_ids") or []) + [b_id]})
+        _write_audit(b_ref, action="add_spouse", actor=actor,
+                     fields_changed=["spouse_ids"],
+                     before={"spouse_ids": b_data.get("spouse_ids") or []},
+                     after={"spouse_ids": (b_data.get("spouse_ids") or []) + [a_id]})
+
+    def remove_spouse(self, a_id: str, b_id: str, *, actor: dict, reason: str):
+        if not (reason or "").strip():
+            raise ValidationError("Removal requires a reason for the audit log")
+        a_data = self._get_existing(a_id)
+        b_data = self._get_existing(b_id)
+
+        a_ref = self._persons().document(a_id)
+        b_ref = self._persons().document(b_id)
+        now = server_timestamp()
+
+        batch = self.db.batch()
+        batch.update(a_ref, {
+            "spouse_ids": gcf.ArrayRemove([b_id]),
+            "updated_at": now, "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.update(b_ref, {
+            "spouse_ids": gcf.ArrayRemove([a_id]),
+            "updated_at": now, "updated_by_uid": actor.get("uid", ""),
+        })
+        batch.commit()
+
+        actor_with_reason = {**actor, "reason": reason}
+        _write_audit(a_ref, action="remove_spouse", actor=actor_with_reason,
+                     fields_changed=["spouse_ids"],
+                     before={"spouse_ids": a_data.get("spouse_ids") or []},
+                     after={"spouse_ids": [s for s in (a_data.get("spouse_ids") or []) if s != b_id],
+                            "reason": reason})
+        _write_audit(b_ref, action="remove_spouse", actor=actor_with_reason,
+                     fields_changed=["spouse_ids"],
+                     before={"spouse_ids": b_data.get("spouse_ids") or []},
+                     after={"spouse_ids": [s for s in (b_data.get("spouse_ids") or []) if s != a_id],
+                            "reason": reason})

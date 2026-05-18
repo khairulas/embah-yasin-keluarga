@@ -95,3 +95,13 @@ def admin_required(view: Callable) -> Callable:
             return jsonify({"error": "forbidden"}), 403
         return view(*args, **kwargs)
     return wrapper
+
+def editor_required(view: Callable) -> Callable:
+    """Decorator: requires role='admin' or role='editor'."""
+    @wraps(view)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if g.user.get("role") not in ("admin", "editor"):
+            return jsonify({"error": "forbidden — editor or admin role required"}), 403
+        return view(*args, **kwargs)
+    return wrapper

@@ -2,15 +2,28 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signOut,
-  onAuthStateChanged
+  onAuthStateChanged, connectAuthEmulator,
+  signInWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 const app = initializeApp(window.FIREBASE_CONFIG);
 export const auth = getAuth(app);
 
+// Connect to the local Auth emulator when running on localhost
+const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+if (isLocal) {
+  connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
+  console.log("🔧 Using Firebase Auth emulator");
+}
+
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   return await signInWithPopup(auth, provider);
+}
+
+/** Local-only: sign in with email/password against the auth emulator. */
+export async function signInWithEmailPassword(email, password) {
+  return await signInWithEmailAndPassword(auth, email, password);
 }
 
 export async function signOutUser() {

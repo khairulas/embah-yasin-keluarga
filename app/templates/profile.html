@@ -124,15 +124,50 @@
 
     <!-- Family tab -->
     <div class="tab-pane fade" id="tab-family">
-      <h5>Ibu Bapa</h5>
-      <ul id="parents-list" class="list-group mb-3"></ul>
-      <h5>Pasangan</h5>
-      <ul id="spouses-list" class="list-group mb-3"></ul>
-      <h5>Anak</h5>
-      <ul id="children-list" class="list-group mb-3"></ul>
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Ibu Bapa</h5>
+        <button class="btn btn-sm btn-outline-primary rel-add-btn" data-rel="parent" style="display:none;">+ Tambah Ibu Bapa</button>
+      </div>
+      <ul id="parents-list" class="list-group mb-3 mt-2"></ul>
+
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Pasangan</h5>
+        <button class="btn btn-sm btn-outline-primary rel-add-btn" data-rel="spouse" style="display:none;">+ Tambah Pasangan</button>
+      </div>
+      <ul id="spouses-list" class="list-group mb-3 mt-2"></ul>
+
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Anak</h5>
+        <button class="btn btn-sm btn-outline-primary rel-add-btn" data-rel="child" style="display:none;">+ Tambah Anak</button>
+      </div>
+      <ul id="children-list" class="list-group mb-3 mt-2"></ul>
+
       <p class="text-muted">
-        <small>Untuk menghubungkan ahli keluarga, gunakan halaman keluarga atau hubungi admin.</small>
+        <small id="rel-permission-note">Hanya admin/editor boleh mengubah hubungan keluarga.</small>
       </p>
+    </div>
+
+    <!-- Person picker modal (shared for parent/spouse/child add) -->
+    <div class="modal fade" id="personPickerModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="pickerTitle">Pilih orang</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <input type="search" id="pickerSearch" class="form-control"
+                   placeholder="Cari nama (minimum 2 huruf)..." autocomplete="off">
+            <div id="pickerStatus" class="text-muted small mt-2"></div>
+            <div id="pickerResults" class="list-group mt-3"></div>
+            <div id="pickerConfirm" class="alert alert-info mt-3 d-none">
+              <div id="pickerConfirmText" class="mb-2"></div>
+              <button class="btn btn-primary btn-sm" id="pickerConfirmBtn">Sahkan</button>
+              <button class="btn btn-secondary btn-sm" id="pickerCancelBtn">Batal</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Audit tab -->

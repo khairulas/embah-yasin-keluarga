@@ -36,6 +36,12 @@
     window.FIREBASE_CONFIG = {{ firebase_config | tojson }};
   </script>
 
+  <!-- Bootstrap JS bundle (includes Popper) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Firebase JS SDK (modular v10) -->
+<script type="module" src="/static/auth.js"></script>
+
   <!-- Firebase JS SDK (modular v10) -->
   <script type="module" src="/static/auth.js"></script>
   {% block scripts %}{% endblock %}

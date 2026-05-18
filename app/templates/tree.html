@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Pohon Keluarga{% endblock %}
+
+{% block content %}
+<style>
+  #tree-container { width: 100%; height: calc(100vh - 200px);
+    border: 1px solid #dee2e6; border-radius: 0.375rem;
+    background: #fafafa; overflow: hidden; position: relative; }
+  .node-card rect { fill: #fff; stroke: #6c757d; stroke-width: 1.5; rx: 4; }
+  .node-card.deceased rect { fill: #f8f9fa; stroke-dasharray: 4 2; }
+  .node-card.focus rect { stroke: #0d6efd; stroke-width: 2.5; }
+  .node-card.spouse rect { fill: #fff8e7; }
+  .node-name { font-size: 11px; font-weight: 600; fill: #212529; }
+  .node-dates { font-size: 10px; fill: #6c757d; }
+  .link { fill: none; stroke: #adb5bd; stroke-width: 1.5; }
+  .spouse-link { stroke: #ffc107; stroke-dasharray: 3 3; }
+  #tree-controls { position: absolute; top: 10px; right: 20px; z-index: 10; }
+</style>
+
+<div class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Pohon Keluarga</h2>
+    <button id="download-gedcom-btn" class="btn btn-outline-secondary btn-sm">Muat turun GEDCOM</button>
+  </div>
+  <div id="tree-controls" class="btn-group btn-group-sm">
+    <button class="btn btn-light border" id="zoom-in">+</button>
+    <button class="btn btn-light border" id="zoom-out">−</button>
+    <button class="btn btn-light border" id="zoom-fit">⊡</button>
+  </div>
+  <div id="tree-container"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script type="module">
+  import { authedFetch, onAuthReady } from "{{ url_for('static', filename='auth.js') }}";
+
+  const FOCUS_ID = "{{ focus_id }}";
+
+  onAuthReady(async (user) => {
+    if (!user) return;
+    if (!FOCUS_ID) {
+      document.getElementById('tree-container').innerHTML =
+        '<div class="p-4 text-warning">FOUNDER_PERSON_ID not configured. Visit /tree/&lt;person_id&gt; directly.</div>';
+      return;
+    }
+    const res = await authedFetch(`/api/tree/${FOCUS_ID}`);
+    if (!res.ok) {
+      document.getElementById('tree-container').innerHTML =
+        '<div class="p-4 text-danger">Gagal memuatkan pohon.</div>';
+      return;
+    }
+    const data = await res.json();
+    renderTree(data);
+  });
+
+document.getElementById('download-gedcom-btn').addEventListener('click', async () => {
+  try {
+    const res = await authedFetch('/export/gedcom');
+    if (!res.ok) { alert('Gagal memuat turun GEDCOM'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `embah-yasin-${new Date().toISOString().slice(0,10).replace(/-/g,'')}.ged`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Ralat: ' + e.message);
+  }
+});
+
+  function renderTree(data) {
+    const container = document.getElementById('tree-container');
+    const width = container.clientWidth, height = container.clientHeight;
+    const svg = d3.select(container).append('svg')
+      .attr('width', width).attr('height', height);
+    const g = svg.append('g');
+    const zoom = d3.zoom().scaleExtent([0.2, 3]).on('zoom', (e) => g.attr('transform', e.transform));
+    svg.call(zoom);
+    document.getElementById('zoom-in').onclick  = () => svg.transition().call(zoom.scaleBy, 1.3);
+    document.getElementById('zoom-out').onclick = () => svg.transition().call(zoom.scaleBy, 1 / 1.3);
+    document.getElementById('zoom-fit').onclick = () => svg.transition().call(zoom.transform, d3.zoomIdentity);
+
+    const NODE_W = 140, NODE_H = 50, SPOUSE_GAP = 20;
+    const offsetX = width / 2;
+    const offsetY = (data.ancestors && data.ancestors.children && data.ancestors.children.length)
+      ? height * 0.4 : height * 0.15;
+
+    if (data.descendants) {
+      const root = d3.hierarchy(data.descendants);
+      d3.tree().nodeSize([NODE_W + SPOUSE_GAP, NODE_H * 2.5])(root);
+
+      g.append('g').selectAll('path').data(root.links()).join('path')
+        .attr('class', 'link')
+        .attr('d', d => {
+          const sx = d.source.x + offsetX, sy = d.source.y + offsetY;
+          const tx = d.target.x + offsetX, ty = d.target.y + offsetY;
+          const my = (sy + ty) / 2;
+          return `M${sx},${sy} V${my} H${tx} V${ty}`;
+        });
+
+      const nodeGroups = g.append('g').selectAll('g').data(root.descendants()).join('g')
+        .attr('transform', d => `translate(${d.x + offsetX},${d.y + offsetY})`);
+
+      nodeGroups.each(function (d) {
+        renderCard(d3.select(this), d.data, d.data.id === data.focus_id);
+        (d.data.spouses || []).forEach((spouse, i) => {
+          const offset = (NODE_W + SPOUSE_GAP) * (i + 1);
+          const spouseG = d3.select(this).append('g').attr('transform', `translate(${offset}, 0)`);
+          renderCard(spouseG, spouse, false, true);
+          d3.select(this).insert('line', ':first-child')
+            .attr('class', 'link spouse-link')
+            .attr('x1', NODE_W / 2).attr('y1', 0)
+            .attr('x2', offset - NODE_W / 2).attr('y2', 0);
+        });
+      });
+    }
+
+    if (data.ancestors && data.ancestors.children && data.ancestors.children.length) {
+      const ancestorRoot = d3.hierarchy(data.ancestors);
+      d3.tree().nodeSize([NODE_W + SPOUSE_GAP, NODE_H * 2.5])(ancestorRoot);
+      ancestorRoot.descendants().forEach(d => { d.y = -d.y; });
+
+      g.append('g').selectAll('path').data(ancestorRoot.links()).join('path')
+        .attr('class', 'link')
+        .attr('d', d => {
+          const sx = d.source.x + offsetX, sy = d.source.y + offsetY;
+          const tx = d.target.x + offsetX, ty = d.target.y + offsetY;
+          const my = (sy + ty) / 2;
+          return `M${sx},${sy} V${my} H${tx} V${ty}`;
+        });
+
+      g.append('g').selectAll('g')
+        .data(ancestorRoot.descendants().filter(d => d.depth > 0)).join('g')
+        .attr('transform', d => `translate(${d.x + offsetX},${d.y + offsetY})`)
+        .each(function (d) { renderCard(d3.select(this), d.data, false); });
+    }
+
+    function renderCard(sel, person, isFocus, isSpouse = false) {
+      const cls = ['node-card'];
+      if (person.is_deceased) cls.push('deceased');
+      if (isFocus) cls.push('focus');
+      if (isSpouse) cls.push('spouse');
+      const grp = sel.append('g').attr('class', cls.join(' '))
+        .style('cursor', 'pointer')
+        .on('click', () => { window.location.href = `/tree/${person.id}`; });
+      grp.append('rect')
+        .attr('x', -NODE_W / 2).attr('y', -NODE_H / 2)
+        .attr('width', NODE_W).attr('height', NODE_H);
+      const display = person.name.length > 22 ? person.name.slice(0, 20) + '…' : person.name;
+      grp.append('text').attr('class', 'node-name')
+        .attr('text-anchor', 'middle').attr('y', -6).text(display)
+        .append('title').text(person.name);
+      const dates = formatDates(person.birth_year, person.death_year, person.is_deceased);
+      if (dates) {
+        grp.append('text').attr('class', 'node-dates')
+          .attr('text-anchor', 'middle').attr('y', 10).text(dates);
+      }
+    }
+
+    function formatDates(b, d, deceased) {
+      if (b && d) return `b. ${b} – d. ${d}`;
+      if (b && deceased) return `b. ${b} – d. ?`;
+      if (b) return `b. ${b}`;
+      if (d) return `d. ${d}`;
+      return '';
+    }
+  }
+</script>
+{% endblock %}
