@@ -118,12 +118,12 @@ class PersonRepository:
                 continue
             haystack = (p.get("full_name_lower") or p.get("full_name", "").lower())
             if q_lower in haystack:
-                birth = p.get("birth_date") or p.get("dob") or ""
+                birth = p.get("tarikh_lahir") or ""
                 results.append({
                     "id": p["person_id"],
                     "full_name": p.get("full_name", "—"),
-                    "birth_year": birth[:4] if birth else None,
-                    "gender": p.get("gender"),
+                    "birth_year": p.get("tahun_lahir") or (birth[:4] if birth else None),
+                    "gender": p.get("jantina"),
                 })
                 if len(results) >= limit:
                     break

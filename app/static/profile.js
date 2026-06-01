@@ -262,7 +262,7 @@ function wirePickerEvents() {
                   data-id="${escapeHtml(p.id)}" data-name="${escapeHtml(p.full_name)}">
             <strong>${escapeHtml(p.full_name)}</strong>
             <small class="text-muted d-block">
-              ${p.gender === 'M' ? 'Lelaki' : p.gender === 'F' ? 'Perempuan' : ''}
+              ${p.gender === 'L' ? 'Lelaki' : p.gender === 'P' ? 'Perempuan' : ''}
               ${p.birth_year ? ' · b. ' + p.birth_year : ''}
             </small>
           </button>

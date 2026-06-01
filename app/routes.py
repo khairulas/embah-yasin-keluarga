@@ -12,9 +12,9 @@ import os
 
 from flask import Blueprint, jsonify, request, render_template, g, current_app
 
-from .auth import login_required, admin_required
+from .auth import login_required, admin_required, editor_required
 from .repositories import (
-    PersonRepository, HouseholdRepository, recent_activity
+    PersonRepository, HouseholdRepository, RelationshipRepository, recent_activity
 )
 from .models import ValidationError
 
@@ -244,10 +244,10 @@ def api_tree(person_id):
         return {
             "id": p["person_id"],
             "name": p.get("full_name", "—"),
-            "birth_year": _year(p.get("birth_date") or p.get("dob")),
-            "death_year": _year(p.get("death_date")),
-            "gender": p.get("gender"),
-            "is_deceased": bool(p.get("death_date")) or (p.get("status") == "deceased"),
+            "birth_year": p.get("tahun_lahir") or _year(p.get("tarikh_lahir")),
+            "death_year": _year(p.get("tarikh_meninggal")),
+            "gender": p.get("jantina"),
+            "is_deceased": bool(p.get("tarikh_meninggal")) or (p.get("status") == "deceased"),
             "spouse_ids": p.get("spouse_ids") or [],
             "parent_ids": p.get("parent_ids") or [],
             "child_ids": p.get("child_ids") or [],

@@ -91,27 +91,29 @@ def export_gedcom(persons, *, submitter_name="Embah Yasin Family Registry"):
         if full and full != to_gedcom_name(parsed):
             out.write(f"1 NOTE Nama penuh asal: {full}\n")
 
-        sex = (person.get("gender") or "").upper()
+        sex = (person.get("jantina") or person.get("gender") or "").upper()
         if sex in ("M", "MALE", "LELAKI", "L"):
             out.write("1 SEX M\n")
         elif sex in ("F", "FEMALE", "PEREMPUAN", "P"):
             out.write("1 SEX F\n")
 
-        birth = person.get("birth_date") or person.get("dob")
-        if birth:
+        birth = person.get("tarikh_lahir") or person.get("birth_date") or person.get("dob")
+        birth_year = person.get("tahun_lahir")
+        if birth or birth_year:
             out.write("1 BIRT\n")
-            date_str = _gedcom_date(birth)
+            date_str = _gedcom_date(birth) if birth else str(birth_year)
             if date_str:
                 out.write(f"2 DATE {date_str}\n")
             if person.get("birth_place"):
                 out.write(f"2 PLAC {person['birth_place']}\n")
 
-        has_death_date = bool(person.get("death_date"))
+        death = person.get("tarikh_meninggal") or person.get("death_date")
+        has_death_date = bool(death)
         is_deceased = has_death_date or parsed["is_deceased_marker"] or person.get("status") == "deceased"
         if is_deceased:
             out.write("1 DEAT\n" if has_death_date else "1 DEAT Y\n")
             if has_death_date:
-                date_str = _gedcom_date(person["death_date"])
+                date_str = _gedcom_date(death)
                 if date_str:
                     out.write(f"2 DATE {date_str}\n")
             if person.get("death_place"):
