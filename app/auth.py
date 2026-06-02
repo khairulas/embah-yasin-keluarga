@@ -105,3 +105,9 @@ def editor_required(view: Callable) -> Callable:
             return jsonify({"error": "forbidden — editor or admin role required"}), 403
         return view(*args, **kwargs)
     return wrapper
+
+def is_admin_or_editor(user: dict) -> bool:
+    """True if the user record has role admin or editor. Used for per-request
+    ownership checks where role alone can't decide (a member may edit edges
+    that touch their own claimed person)."""
+    return (user or {}).get("role") in ("admin", "editor")

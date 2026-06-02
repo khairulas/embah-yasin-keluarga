@@ -12,16 +12,11 @@ import os
 
 from flask import Blueprint, jsonify, request, render_template, g, current_app
 
-from .auth import login_required, admin_required, editor_required
+from .auth import login_required, admin_required, editor_required, is_admin_or_editor
 from .repositories import (
     PersonRepository, HouseholdRepository, RelationshipRepository, recent_activity
 )
 from .models import ValidationError
-
-from .auth import login_required, admin_required, editor_required
-from .repositories import (
-    PersonRepository, HouseholdRepository, RelationshipRepository, recent_activity
-)
 
 bp = Blueprint("main", __name__)
 
@@ -244,10 +239,10 @@ def api_tree(person_id):
         return {
             "id": p["person_id"],
             "name": p.get("full_name", "—"),
-            "birth_year": p.get("tahun_lahir") or _year(p.get("tarikh_lahir")),
-            "death_year": _year(p.get("tarikh_meninggal")),
-            "gender": p.get("jantina"),
-            "is_deceased": bool(p.get("tarikh_meninggal")) or (p.get("status") == "deceased"),
+            "birth_year": _year(p.get("birth_date") or p.get("dob")),
+            "death_year": _year(p.get("death_date")),
+            "gender": p.get("gender"),
+            "is_deceased": bool(p.get("death_date")) or (p.get("status") == "deceased"),
             "spouse_ids": p.get("spouse_ids") or [],
             "parent_ids": p.get("parent_ids") or [],
             "child_ids": p.get("child_ids") or [],
@@ -295,16 +290,39 @@ def api_tree(person_id):
 
 # ---------------------------- JSON API: relationships ----------------------------
 
+def _may_edit_edge(endpoints) -> bool:
+    """Authorization for ADD operations.
+
+    Admin/editor may edit any edge. A claimed member may edit an edge only if
+    their linked person is one of its endpoints (their own spouse/anak/parent).
+    Removal is NOT covered here — removals stay @editor_required.
+    """
+    if is_admin_or_editor(g.user):
+        return True
+    mine = (g.user or {}).get("linked_person_id")
+    return bool(mine) and mine in endpoints
+
+
+def _forbidden_edge():
+    return jsonify({"error": "forbidden — anda hanya boleh menambah hubungan untuk diri sendiri"}), 403
+
+
 @bp.route("/api/relationships/parent-child", methods=["POST"])
-@editor_required
+@login_required
 def api_add_parent_child():
     data = request.get_json() or {}
     actor = _actor_from_g()
     try:
+        parent_id = data["parent_id"]
+        child_id = data["child_id"]
+    except KeyError as e:
+        return jsonify({"error": str(e)}), 400
+    # Ownership: member may add only if they are the parent or the child on this edge
+    if not _may_edit_edge([parent_id, child_id]):
+        return _forbidden_edge()
+    try:
         RelationshipRepository().add_parent_child(
-            parent_id=data["parent_id"],
-            child_id=data["child_id"],
-            actor=actor,
+            parent_id=parent_id, child_id=child_id, actor=actor,
         )
         return jsonify({"ok": True})
     except (ValidationError, KeyError) as e:
@@ -329,14 +347,19 @@ def api_remove_parent_child():
 
 
 @bp.route("/api/relationships/spouse", methods=["POST"])
-@editor_required
+@login_required
 def api_add_spouse():
     data = request.get_json() or {}
     actor = _actor_from_g()
     try:
-        RelationshipRepository().add_spouse(
-            a_id=data["a_id"], b_id=data["b_id"], actor=actor,
-        )
+        a_id = data["a_id"]
+        b_id = data["b_id"]
+    except KeyError as e:
+        return jsonify({"error": str(e)}), 400
+    if not _may_edit_edge([a_id, b_id]):
+        return _forbidden_edge()
+    try:
+        RelationshipRepository().add_spouse(a_id=a_id, b_id=b_id, actor=actor)
         return jsonify({"ok": True})
     except (ValidationError, KeyError) as e:
         return jsonify({"error": str(e)}), 400
@@ -355,6 +378,69 @@ def api_remove_spouse():
         return jsonify({"ok": True})
     except (ValidationError, KeyError) as e:
         return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/relationships/new-person", methods=["POST"])
+@login_required
+def api_add_new_person_relationship():
+    """Create a brand-new person and link them to an anchor in one transaction-ish flow.
+
+    Body: { kind: "anak"|"spouse", anchor_id: <existing person>, person: {full_name, jantina, ...} }
+
+    Scope:
+      - kind is restricted to "anak" and "spouse". Creating a NEW person as a
+        parent is disallowed (ancestors already exist / predate the system).
+      - Admin/editor may anchor to anyone. A member may anchor only to their own
+        linked person.
+      - The new person is created first (audited), then linked (audited). If the
+        link fails, the created person is soft-deleted to avoid orphan records.
+    """
+    data = request.get_json() or {}
+    actor = _actor_from_g()
+
+    kind = (data.get("kind") or "").strip().lower()
+    if kind not in ("anak", "spouse"):
+        return jsonify({"error": "kind mesti 'anak' atau 'spouse'"}), 400
+
+    anchor_id = data.get("anchor_id")
+    if not anchor_id:
+        return jsonify({"error": "anchor_id diperlukan"}), 400
+
+    # Ownership: the anchor must be the member's own person (admin/editor bypass).
+    if not _may_edit_edge([anchor_id]):
+        return _forbidden_edge()
+
+    person_payload = data.get("person") or {}
+    if not (person_payload.get("full_name") or "").strip():
+        return jsonify({"error": "Nama penuh diperlukan untuk orang baharu"}), 400
+
+    repo = PersonRepository()
+    rel = RelationshipRepository()
+
+    # 1) Verify the anchor exists before creating anything.
+    if repo.get(anchor_id) is None:
+        return jsonify({"error": "Orang sandaran (anchor) tidak dijumpai"}), 404
+
+    # 2) Create the new person.
+    try:
+        new_id = repo.create(person_payload, actor=actor)
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+
+    # 3) Link, rolling back the created person if the link fails.
+    try:
+        if kind == "anak":
+            rel.add_parent_child(parent_id=anchor_id, child_id=new_id, actor=actor)
+        else:  # spouse
+            rel.add_spouse(a_id=anchor_id, b_id=new_id, actor=actor)
+    except (ValidationError, KeyError) as e:
+        try:
+            repo.soft_delete(new_id, actor=actor)
+        except Exception:
+            current_app.logger.exception("failed to roll back orphan person %s", new_id)
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({"ok": True, "person_id": new_id, "person": repo.get(new_id)}), 201
 
 
 # ---------------------------- GEDCOM export ----------------------------

@@ -176,17 +176,36 @@ function escapeHtml(s) {
 
 // ---------------------------- Relationship editing ----------------------------
 
+// Removal + edit-anyone power: admin/editor only.
 function canEditRelationships() {
   return currentUser && (currentUser.role === "admin" || currentUser.role === "editor");
 }
 
+// Add power: admin/editor (anyone) OR a claimed member viewing their OWN profile.
+function canAddRelationships() {
+  if (canEditRelationships()) return true;
+  const mine = currentUser && currentUser.linked_person_id;
+  return Boolean(mine) && mine === (currentPerson && currentPerson.person_id);
+}
+
 function applyRelEditingVisibility() {
-  const canEdit = canEditRelationships();
+  const canAdd = canAddRelationships();
   document.querySelectorAll(".rel-add-btn").forEach(btn => {
-    btn.style.display = canEdit ? "inline-block" : "none";
+    btn.style.display = canAdd ? "inline-block" : "none";
   });
   const note = document.getElementById("rel-permission-note");
-  if (note) note.style.display = canEdit ? "none" : "block";
+  if (note) {
+    if (canEditRelationships()) {
+      note.style.display = "none";
+    } else if (canAdd) {
+      // Member on their own profile: explain the limited scope.
+      note.textContent = "Anda boleh menambah ibu bapa, pasangan, dan anak untuk diri sendiri. Hubungi admin untuk membuang hubungan.";
+      note.style.display = "block";
+    } else {
+      note.textContent = "Hanya admin/editor boleh mengubah hubungan keluarga.";
+      note.style.display = "block";
+    }
+  }
 }
 
 async function fillFamilyList(elementId, ids) {
@@ -253,7 +272,7 @@ function wirePickerEvents() {
         const results = j.results || [];
         if (!results.length) {
           statusEl.textContent = "Tiada hasil.";
-          resultsEl.innerHTML = "";
+          resultsEl.innerHTML = newPersonButtonHtml(searchInput.value.trim());
           return;
         }
         statusEl.textContent = `${results.length} hasil ditemui.`;
@@ -266,7 +285,7 @@ function wirePickerEvents() {
               ${p.birth_year ? ' · b. ' + p.birth_year : ''}
             </small>
           </button>
-        `).join("");
+        `).join("") + newPersonButtonHtml(searchInput.value.trim());
       } catch (e) {
         statusEl.textContent = "Ralat: " + e.message;
       }
@@ -274,6 +293,11 @@ function wirePickerEvents() {
   });
 
   resultsEl.addEventListener("click", (e) => {
+    const newBtn = e.target.closest(".picker-newperson-btn");
+    if (newBtn) {
+      showNewPersonForm(newBtn.dataset.prefill || "");
+      return;
+    }
     const btn = e.target.closest(".picker-result-btn");
     if (!btn) return;
     pickerState.selectedId = btn.dataset.id;
@@ -315,6 +339,90 @@ function wirePickerEvents() {
       confirmBtn.disabled = false;
     }
   });
+}
+
+// --- Create-and-link (members + admin/editor): anak & spouse only, not parents ---
+
+function createKindAllowed() {
+  // pickerState.kind is "parent" | "spouse" | "child"
+  return pickerState.kind === "child" || pickerState.kind === "spouse";
+}
+
+function newPersonButtonHtml(prefill) {
+  if (!createKindAllowed()) return "";  // no new-person path for parents
+  const label = pickerState.kind === "child" ? "anak baharu" : "pasangan baharu";
+  const safe = escapeHtml(prefill || "");
+  return `
+    <button type="button" class="list-group-item list-group-item-action picker-newperson-btn text-primary"
+            data-prefill="${safe}">
+      + Daftar ${label} (orang yang belum ada dalam sistem)
+    </button>`;
+}
+
+function showNewPersonForm(prefillName) {
+  const resultsEl = document.getElementById("pickerResults");
+  const statusEl = document.getElementById("pickerStatus");
+  const confirmEl = document.getElementById("pickerConfirm");
+  confirmEl.classList.add("d-none");
+  statusEl.textContent = "";
+  const kindLabel = pickerState.kind === "child" ? "anak" : "pasangan";
+  resultsEl.innerHTML = `
+    <div class="p-2 border rounded">
+      <h6 class="mb-2">Daftar ${kindLabel} baharu</h6>
+      <input type="text" id="np-name" class="form-control mb-2" placeholder="Nama penuh"
+             value="${escapeHtml(prefillName || "")}">
+      <select id="np-jantina" class="form-select mb-2">
+        <option value="">Jantina (pilihan)</option>
+        <option value="L">Lelaki</option>
+        <option value="P">Perempuan</option>
+      </select>
+      <input type="number" id="np-tahun" class="form-control mb-2"
+             placeholder="Tahun lahir (pilihan)" min="1850" max="2026">
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-primary btn-sm" id="np-save">Daftar & tambah</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="np-cancel">Batal</button>
+      </div>
+      <div id="np-msg" class="small mt-2"></div>
+    </div>`;
+  document.getElementById("np-name").focus();
+  document.getElementById("np-cancel").addEventListener("click", () => {
+    resultsEl.innerHTML = "";
+    document.getElementById("pickerSearch").focus();
+  });
+  document.getElementById("np-save").addEventListener("click", submitNewPerson);
+}
+
+async function submitNewPerson() {
+  const msg = document.getElementById("np-msg");
+  const saveBtn = document.getElementById("np-save");
+  const name = document.getElementById("np-name").value.trim();
+  const jantina = document.getElementById("np-jantina").value;
+  const tahun = document.getElementById("np-tahun").value;
+  if (!name) { msg.innerHTML = '<span class="text-danger">Nama penuh diperlukan.</span>'; return; }
+  if (!createKindAllowed()) {  // defensive — UI shouldn't reach here for parents
+    msg.innerHTML = '<span class="text-danger">Tidak boleh daftar ibu bapa baharu.</span>';
+    return;
+  }
+  saveBtn.disabled = true;
+  msg.innerHTML = '<span class="text-muted">Mendaftar...</span>';
+  const person = { full_name: name };
+  if (jantina) person.jantina = jantina;
+  if (tahun) person.tahun_lahir = parseInt(tahun, 10);
+  const kind = pickerState.kind === "child" ? "anak" : "spouse";
+  try {
+    const r = await authedFetch("/api/relationships/new-person", {
+      method: "POST",
+      body: JSON.stringify({ kind, anchor_id: personId, person }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "permintaan gagal");
+    pickerModal.hide();
+    await reloadPersonAndFamily();
+  } catch (e) {
+    msg.innerHTML = `<span class="text-danger">Gagal: ${escapeHtml(e.message)}</span>`;
+  } finally {
+    saveBtn.disabled = false;
+  }
 }
 
 async function submitAdd(kind, otherId) {
