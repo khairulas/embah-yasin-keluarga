@@ -345,12 +345,16 @@ function wirePickerEvents() {
 
 function createKindAllowed() {
   // pickerState.kind is "parent" | "spouse" | "child"
-  return pickerState.kind === "child" || pickerState.kind === "spouse";
+  // All three allow create-and-link: anak (new baby), spouse (new in-law),
+  // parent (deceased/absent ancestor who cannot enter themselves).
+  return pickerState.kind === "child" || pickerState.kind === "spouse" || pickerState.kind === "parent";
 }
 
 function newPersonButtonHtml(prefill) {
-  if (!createKindAllowed()) return "";  // no new-person path for parents
-  const label = pickerState.kind === "child" ? "anak baharu" : "pasangan baharu";
+  if (!createKindAllowed()) return "";
+  const label = pickerState.kind === "child" ? "anak baharu" :
+                pickerState.kind === "spouse" ? "pasangan baharu" :
+                "ibu/bapa baharu";
   const safe = escapeHtml(prefill || "");
   return `
     <button type="button" class="list-group-item list-group-item-action picker-newperson-btn text-primary"
@@ -365,7 +369,9 @@ function showNewPersonForm(prefillName) {
   const confirmEl = document.getElementById("pickerConfirm");
   confirmEl.classList.add("d-none");
   statusEl.textContent = "";
-  const kindLabel = pickerState.kind === "child" ? "anak" : "pasangan";
+  const kindLabel = pickerState.kind === "child" ? "anak" :
+                    pickerState.kind === "parent" ? "ibu/bapa" :
+                    "pasangan";
   resultsEl.innerHTML = `
     <div class="p-2 border rounded">
       <h6 class="mb-2">Daftar ${kindLabel} baharu</h6>
@@ -399,8 +405,8 @@ async function submitNewPerson() {
   const jantina = document.getElementById("np-jantina").value;
   const tahun = document.getElementById("np-tahun").value;
   if (!name) { msg.innerHTML = '<span class="text-danger">Nama penuh diperlukan.</span>'; return; }
-  if (!createKindAllowed()) {  // defensive — UI shouldn't reach here for parents
-    msg.innerHTML = '<span class="text-danger">Tidak boleh daftar ibu bapa baharu.</span>';
+  if (!createKindAllowed()) {  // defensive — should not be reachable
+    msg.innerHTML = '<span class="text-danger">Jenis hubungan tidak sah untuk pendaftaran orang baharu.</span>';
     return;
   }
   saveBtn.disabled = true;
@@ -408,7 +414,9 @@ async function submitNewPerson() {
   const person = { full_name: name };
   if (jantina) person.jantina = jantina;
   if (tahun) person.tahun_lahir = parseInt(tahun, 10);
-  const kind = pickerState.kind === "child" ? "anak" : "spouse";
+  const kind = pickerState.kind === "child" ? "anak" :
+               pickerState.kind === "parent" ? "ibu_bapa" :
+               "spouse";
   try {
     const r = await authedFetch("/api/relationships/new-person", {
       method: "POST",

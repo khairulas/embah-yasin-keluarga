@@ -385,13 +385,14 @@ def api_remove_spouse():
 def api_add_new_person_relationship():
     """Create a brand-new person and link them to an anchor in one transaction-ish flow.
 
-    Body: { kind: "anak"|"spouse", anchor_id: <existing person>, person: {full_name, jantina, ...} }
+    Body: { kind: "anak"|"spouse"|"ibu_bapa", anchor_id: <existing person>,
+            person: {full_name, jantina, ...} }
 
     Scope:
-      - kind is restricted to "anak" and "spouse". Creating a NEW person as a
-        parent is disallowed (ancestors already exist / predate the system).
+      - kind ∈ {anak, spouse, ibu_bapa}. "ibu_bapa" exists because deceased or
+        absent ancestors cannot enter themselves — the anchor's child adds them.
       - Admin/editor may anchor to anyone. A member may anchor only to their own
-        linked person.
+        linked person (so a member can create their OWN parents, not arbitrary ones).
       - The new person is created first (audited), then linked (audited). If the
         link fails, the created person is soft-deleted to avoid orphan records.
     """
@@ -399,8 +400,8 @@ def api_add_new_person_relationship():
     actor = _actor_from_g()
 
     kind = (data.get("kind") or "").strip().lower()
-    if kind not in ("anak", "spouse"):
-        return jsonify({"error": "kind mesti 'anak' atau 'spouse'"}), 400
+    if kind not in ("anak", "spouse", "ibu_bapa"):
+        return jsonify({"error": "kind mesti 'anak', 'spouse', atau 'ibu_bapa'"}), 400
 
     anchor_id = data.get("anchor_id")
     if not anchor_id:
@@ -428,9 +429,14 @@ def api_add_new_person_relationship():
         return jsonify({"error": str(e)}), 400
 
     # 3) Link, rolling back the created person if the link fails.
+    #    anak     -> new person is the anchor's child
+    #    spouse   -> new person is the anchor's spouse
+    #    ibu_bapa -> new person is the anchor's PARENT (anchor is the child)
     try:
         if kind == "anak":
             rel.add_parent_child(parent_id=anchor_id, child_id=new_id, actor=actor)
+        elif kind == "ibu_bapa":
+            rel.add_parent_child(parent_id=new_id, child_id=anchor_id, actor=actor)
         else:  # spouse
             rel.add_spouse(a_id=anchor_id, b_id=new_id, actor=actor)
     except (ValidationError, KeyError) as e:
