@@ -48,7 +48,7 @@ function personCard(p, { focus = false, spouse = false } = {}) {
   const meta = [jantina, p.birth_year ? "Lahir " + p.birth_year : "",
                 p.is_deceased ? "Allahyarham/ah" : ""].filter(Boolean).join(" · ");
   return `
-    <a href="/tree/${p.id}" class="text-decoration-none">
+    <a href="/profile/${p.id}" class="text-decoration-none">
       <div class="${cls.join(" ")}" style="${style.join("")}">
         <div class="card-body">
           <h6 class="card-title text-dark mb-1">${escapeHtml(p.name)}</h6>
