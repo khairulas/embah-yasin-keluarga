@@ -296,6 +296,49 @@ def api_tree(person_id):
     })
 
 
+@bp.route("/api/home", methods=["GET"])
+@login_required
+def api_home():
+    """Homepage payload: the founder plus his spouses and children (names + ids only).
+
+    Cost: a SINGLE list_all read, assembled in memory — no per-member fan-out.
+    Degrades gracefully if FOUNDER_PERSON_ID is unset or the founder has no links yet.
+    """
+    founder_id = os.environ.get("FOUNDER_PERSON_ID", "")
+    if not founder_id:
+        return jsonify({"founder": None, "reason": "founder_not_configured"})
+
+    repo = PersonRepository()
+    all_persons = repo.list_all(limit=2000)
+    by_id = {p["person_id"]: p for p in all_persons}
+
+    founder = by_id.get(founder_id)
+    if founder is None:
+        return jsonify({"founder": None, "reason": "founder_not_found"})
+
+    def _card(p):
+        return {
+            "id": p["person_id"],
+            "name": p.get("full_name", "—"),
+            "gender": p.get("jantina"),
+            "birth_year": p.get("tahun_lahir"),
+            "is_deceased": bool(p.get("tarikh_meninggal")) or (p.get("status") == "deceased"),
+        }
+
+    spouses = [_card(by_id[s]) for s in (founder.get("spouse_ids") or []) if s in by_id]
+    children = [_card(by_id[c]) for c in (founder.get("child_ids") or []) if c in by_id]
+    # Sort children by birth year when known, unknown years last, then by name.
+    children.sort(key=lambda c: (c["birth_year"] is None, c["birth_year"] or 0, c["name"]))
+
+    return jsonify({
+        "founder": _card(founder),
+        "spouses": spouses,
+        "children": children,
+        # Placeholder for the future cached stats scorecard (Step 2).
+        "stats": None,
+    })
+
+
 # ---------------------------- JSON API: relationships ----------------------------
 
 def _may_edit_edge(endpoints) -> bool:
