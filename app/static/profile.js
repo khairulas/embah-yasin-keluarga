@@ -78,7 +78,15 @@ function renderForm(p, readOnly) {
 
   Array.from(form.elements).forEach(el => { el.disabled = readOnly; });
   formButtons.style.display = readOnly ? "none" : "flex";
-  editBtn.style.display = readOnly ? "inline-block" : "none";
+  // Edit button shows in read-only mode only if the user may edit this profile:
+  // admin/editor (anyone) or the member who has claimed THIS profile.
+  editBtn.style.display = (readOnly && canEditInfo()) ? "inline-block" : "none";
+}
+
+function canEditInfo() {
+  if (canEditRelationships()) return true;  // admin/editor
+  const uid = currentUser && currentUser.uid;
+  return Boolean(uid) && currentPerson && currentPerson.claimed_by_uid === uid;
 }
 
 function setVal(name, value) {

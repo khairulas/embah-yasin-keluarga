@@ -106,6 +106,14 @@ def api_create_person():
 def api_update_person(person_id):
     actor = _actor_from_g()
     repo = PersonRepository()
+    # Fetch once: needed both for the ownership check and to confirm existence.
+    person = repo.get(person_id)
+    if person is None:
+        return jsonify({"error": "not found"}), 404
+    # Authorization: admin/editor may edit anyone; a member may edit only the
+    # profile they have claimed (person.claimed_by_uid == their uid).
+    if not is_admin_or_editor(g.user) and person.get("claimed_by_uid") != getattr(g, "uid", None):
+        return jsonify({"error": "forbidden — anda hanya boleh mengemas kini profil yang anda tuntut"}), 403
     try:
         updated = repo.update(person_id, request.json or {}, actor=actor)
     except ValidationError as e:
@@ -114,7 +122,7 @@ def api_update_person(person_id):
 
 
 @bp.route("/api/persons/<person_id>", methods=["DELETE"])
-@login_required
+@editor_required
 def api_delete_person(person_id):
     actor = _actor_from_g()
     repo = PersonRepository()
